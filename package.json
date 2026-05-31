@@ -1,6 +1,6 @@
 {
-  "name": "@mikefreno/deep-research",
-  "version": "1.0.0",
+  "name": "@mikefreno/deepi-research",
+  "version": "0.1.0",
   "description": "Deep research extension for pi — parallel web research via Firecrawl with iterative query refinement",
   "keywords": [
     "pi-package",
@@ -13,12 +13,13 @@
   ],
   "author": "Michael Freno",
   "license": "MIT",
+  "homepage": "https://github.com/mikefreno/deepi-research",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@git.freno.me/Mike/deepi-research.git"
+    "url": "git+https://github.com/mikefreno/deepi-research.git"
   },
   "bugs": {
-    "url": "https://git.freno.me/Mike/deepi-research/issues"
+    "url": "https://github.com/mikefreno/deepi-research/issues"
   },
   "files": [
     "index.ts",
