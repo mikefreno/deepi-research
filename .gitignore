@@ -1,4 +1,5 @@
 node_modules/
 dist/
-AGENTS.md
-.pi-lens
+*.js
+*.js.map
+.pi-lens/
