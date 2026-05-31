@@ -1,12 +1,49 @@
 {
-  "name": "deep-research",
+  "name": "@mikefreno/deep-research",
   "version": "1.0.0",
   "description": "Deep research extension for pi — parallel web research via Firecrawl with iterative query refinement",
-  "private": true,
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "research",
+    "firecrawl",
+    "deep-research",
+    "web-search",
+    "ai"
+  ],
+  "author": "Michael Freno",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@git.freno.me/Mike/deepi-research.git"
+  },
+  "bugs": {
+    "url": "https://git.freno.me/Mike/deepi-research/issues"
+  },
+  "files": [
+    "index.ts",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsc --noEmit"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
   "pi": {
     "extensions": [
       "./index.ts"
     ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
