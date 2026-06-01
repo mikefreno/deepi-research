@@ -3,7 +3,7 @@
  *
  * Registers:
  *   - `deep_research` tool — callable by the LLM to conduct deep research
- *   - `/deep-research` command — interactive session invocation
+ *   - `/deepi-research` command — interactive session invocation
  *
  * Architecture:
  *   Each research round generates queries, searches in parallel via
@@ -24,18 +24,21 @@ import { Type } from "typebox";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { runDeepResearch, type ResearchProgress } from "./src/research";
 import { isFirecrawlReachable } from "./src/firecrawl";
-import type { ResearchConfig, ResearchReport } from "./src/types";
+import type { ResearchConfig, ResearchReport, Audience } from "./src/types";
 
 /* ── Constants ────────────────────────────────────────────────────── */
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const PHASE_ICONS: Record<string, string> = {
+	decomposing: "🧩",
 	generating_queries: "🔍",
 	searching: "🌐",
 	analyzing: "📊",
 	synthesizing: "📝",
 	complete: "✅",
 };
+
+type ResearchPhase = Parameters<ResearchProgress>[0]["phase"];
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
 
@@ -60,7 +63,7 @@ const DeepResearchParams = Type.Object({
 	depth: Type.Optional(
 		Type.Integer({
 			description:
-				"Number of research rounds (1-3). Each round uses findings from the previous to generate deeper follow-up queries. Default: 2",
+				"Number of research rounds (1-3). Each round builds on findings from the previous for deeper analysis. Default: 2",
 			minimum: 1,
 			maximum: 3,
 			default: 2,
@@ -69,7 +72,7 @@ const DeepResearchParams = Type.Object({
 	breadth: Type.Optional(
 		Type.Integer({
 			description:
-				"Number of search queries per round (1-5). More queries = broader coverage. Default: 3",
+				"Number of search queries per round (1-5). More queries = broader coverage but slower. Default: 3",
 			minimum: 1,
 			maximum: 5,
 			default: 3,
@@ -78,16 +81,30 @@ const DeepResearchParams = Type.Object({
 	format: Type.Optional(
 		Type.Union([Type.Literal("markdown"), Type.Literal("structured")], {
 			description:
-				'Output format for the research report. "markdown" for prose, "structured" for detailed sections. Default: "markdown"',
+				'Output format for the research report. "markdown" for prose with headings, "structured" for detailed hierarchical sections. Default: "markdown"',
 			default: "markdown",
 		}),
+	),
+	audience: Type.Optional(
+		Type.Union(
+			[
+				Type.Literal("general"),
+				Type.Literal("expert"),
+				Type.Literal("executive"),
+			],
+			{
+				description:
+					"Target audience for the report. 'general' (accessible), 'expert' (technical depth), 'executive' (concise, action-oriented). Default: 'general'",
+				default: "general",
+			},
+		),
 	),
 	details: Type.Optional(
 		Type.Object({
 			showRoundDetails: Type.Optional(
 				Type.Boolean({
 					description:
-						"Include per-round search details in the output. Default: false",
+						"Include per-round search methodology in the output. Default: false",
 				}),
 			),
 		}),
@@ -106,6 +123,88 @@ interface ResearchDetails {
 	durationMs: number;
 }
 
+/* ── Widget Helper ────────────────────────────────────────────────── */
+
+/**
+ * Create a widget state that drives a spinner-based progress widget.
+ * Returns the state object, the timer, and cleanup function.
+ */
+function createProgressWidget(
+	ctx: any,
+	initialPhase: ResearchPhase = "generating_queries",
+) {
+	const state: {
+		phase: ResearchPhase;
+		message: string;
+		detail: string | undefined;
+		fraction: number;
+		round: number | undefined;
+		totalRounds: number | undefined;
+	} = {
+		phase: initialPhase,
+		message: "Starting...",
+		detail: undefined,
+		fraction: 0,
+		round: undefined,
+		totalRounds: undefined,
+	};
+
+	let widgetTui: { requestRender(): void } | null = null;
+	let spinnerIdx = 0;
+
+	ctx.ui.setWidget(
+		"deep-research",
+		(tui: { requestRender(): void }, _theme: any) => {
+			widgetTui = tui;
+			return {
+				render: () => {
+					const spinner = SPINNER_FRAMES[spinnerIdx];
+					const icon = PHASE_ICONS[state.phase] ?? "";
+					const roundInfo =
+						state.round && state.totalRounds
+							? ` Round ${state.round}/${state.totalRounds}`
+							: "";
+					const lines: string[] = [
+						`${spinner} ${icon} ${truncate(state.message, 80)}${roundInfo}`,
+					];
+					if (state.detail) {
+						lines.push(`  ${truncate(state.detail, 76)}`);
+					}
+					if (state.fraction > 0) {
+						const barLen = 15;
+						const filled = Math.round(barLen * state.fraction);
+						const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
+						lines.push(`  ${bar}`);
+					}
+					return lines;
+				},
+				invalidate: () => {},
+			};
+		},
+	);
+
+	const spinnerTimer = setInterval(() => {
+		spinnerIdx = (spinnerIdx + 1) % SPINNER_FRAMES.length;
+		widgetTui?.requestRender();
+	}, 100);
+
+	const onProgress: ResearchProgress = (update) => {
+		state.phase = update.phase;
+		state.message = update.message;
+		state.detail = update.detail;
+		state.fraction = update.fraction ?? 0;
+		state.round = update.round;
+		state.totalRounds = update.totalRounds;
+	};
+
+	const cleanup = () => {
+		clearInterval(spinnerTimer);
+		ctx.ui.setWidget("deep-research", undefined);
+	};
+
+	return { state, onProgress, cleanup, spinnerTimer };
+}
+
 /* ── Extension Entry ───────────────────────────────────────────────── */
 
 export default function (pi: ExtensionAPI) {
@@ -114,16 +213,18 @@ export default function (pi: ExtensionAPI) {
 		label: "Deep Research",
 		description: [
 			"Conduct multi-round deep web research on any topic using Firecrawl.",
-			"Generates diverse search queries, searches the web in parallel, analyzes results, and produces a comprehensive report.",
-			"Supports iterative refinement: each round builds on findings from the previous one.",
-			"Parameters: question (required), depth (1-3, default 2), breadth (1-5, default 3), format (markdown|structured).",
+			"Generates diverse search queries, searches the web in parallel, analyzes results,",
+			"and produces a comprehensive report with numbered citations and a bibliography.",
+			"Supports iterative refinement and sub-question decomposition for deeper analysis.",
+			"Parameters: question (required), depth, breadth, format, audience, details.",
 		].join(" "),
 		promptSnippet:
-			"deep_research — multi-round deep web research via Firecrawl with iterative query refinement",
+			"deep_research — multi-round deep web research via Firecrawl with iterative query refinement, sub-question decomposition, source authority scoring, and numbered citations",
 		promptGuidelines: [
 			"Use deep_research for complex, multi-faceted questions that benefit from multiple search angles and iterative refinement.",
 			"The tool handles query generation, web search, result analysis, and report synthesis automatically.",
 			"For simple fact-finding questions, use firecrawl_search directly instead.",
+			"Set audience to 'executive' for concise, action-oriented reports; 'expert' for technical depth; 'general' (default) for accessible reports.",
 		],
 		parameters: DeepResearchParams,
 
@@ -134,6 +235,7 @@ export default function (pi: ExtensionAPI) {
 				depth?: number;
 				breadth?: number;
 				format?: "markdown" | "structured";
+				audience?: Audience;
 				details?: { showRoundDetails?: boolean };
 			},
 			signal: AbortSignal | undefined,
@@ -145,60 +247,17 @@ export default function (pi: ExtensionAPI) {
 				depth: params.depth ?? 2,
 				breadth: params.breadth ?? 3,
 				format: params.format ?? "markdown",
+				audience: params.audience ?? "general",
 			};
 
-			// Use provided signals
 			const abortSignal = signal;
-
-			// Wire progress updates to both the widget and onUpdate
-			let spinnerIdx = 0;
-			const spinnerTimer = setInterval(() => {
-				spinnerIdx = (spinnerIdx + 1) % SPINNER_FRAMES.length;
-			}, 100);
+			// eslint-disable-next-line @typescript-eslint/no-unused-vars
+			const { state: _state, onProgress, cleanup } = createProgressWidget(ctx);
 
 			let researchResult: ResearchReport | null = null;
 			let lastError: string | null = null;
 
-			const onProgress: ResearchProgress = (update) => {
-				const icon = PHASE_ICONS[update.phase] ?? "";
-				const spinner = SPINNER_FRAMES[spinnerIdx];
-				const roundInfo =
-					update.round && update.totalRounds
-						? ` Round ${update.round}/${update.totalRounds}`
-						: "";
-
-				// Update widget
-				const lines: string[] = [
-					`${spinner} ${icon} ${truncate(update.message, 80)}${roundInfo}`,
-				];
-				if (update.detail) {
-					lines.push(`  ${truncate(update.detail, 76)}`);
-				}
-				if (update.fraction !== undefined) {
-					const barLen = 15;
-					const filled = Math.round(barLen * update.fraction);
-					const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
-					lines.push(`  ${bar}`);
-				}
-				ctx.ui.setWidget("deep-research", lines);
-
-				// Stream partial results via onUpdate
-				if (onUpdate) {
-					const partialText = lines.join("\n");
-					onUpdate({
-						content: [{ type: "text", text: partialText }],
-						details: {
-							phase: update.phase,
-							round: update.round,
-							message: update.message,
-							fraction: update.fraction,
-						},
-					});
-				}
-			};
-
 			try {
-				// Initial status
 				ctx.ui.setStatus(
 					"deep-research",
 					`🌐 Researching: ${truncate(config.question, 40)}`,
@@ -231,10 +290,30 @@ export default function (pi: ExtensionAPI) {
 					durationMs: researchResult.durationMs,
 				};
 
-				const showRoundDetails = params.details?.showRoundDetails ?? false;
+				// Stream final content via onUpdate before returning
+				if (onUpdate) {
+					onUpdate({
+						content: [{ type: "text", text: researchResult.finalReport }],
+						details: {
+							phase: "complete",
+							duration: researchResult.durationMs,
+							rounds: researchResult.rounds.length,
+							findings: researchResult.rounds.reduce(
+								(s, r) => s + r.findings.length,
+								0,
+							),
+							references: researchResult.references.length,
+						},
+					});
+				}
+
+				cleanup();
+				ctx.ui.setStatus("deep-research", undefined);
 
 				let output = researchResult.finalReport;
-				if (showRoundDetails) {
+
+				// Append methodology section if requested
+				if (params.details?.showRoundDetails) {
 					output += `\n\n---\n\n## Research Methodology\n\n`;
 					for (const round of researchResult.rounds) {
 						output += `### Round ${round.round}\n\n`;
@@ -247,21 +326,16 @@ export default function (pi: ExtensionAPI) {
 					}
 					output += `**Total searches:** ${researchResult.totalSearches}\n`;
 					output += `**Total pages scraped:** ${researchResult.totalPagesScraped}\n`;
+					output += `**Sources in bibliography:** ${researchResult.references.length}\n`;
 					output += `**Duration:** ${formatDuration(researchResult.durationMs)}\n`;
 				}
-
-				// Clean up widget
-				clearInterval(spinnerTimer);
-				ctx.ui.setWidget("deep-research", undefined);
-				ctx.ui.setStatus("deep-research", undefined);
 
 				return {
 					content: [{ type: "text", text: output }],
 					details,
 				};
 			} catch (error) {
-				clearInterval(spinnerTimer);
-				ctx.ui.setWidget("deep-research", undefined);
+				cleanup();
 				ctx.ui.setStatus("deep-research", undefined);
 
 				lastError = error instanceof Error ? error.message : String(error);
@@ -274,11 +348,12 @@ export default function (pi: ExtensionAPI) {
 						},
 					],
 					details: {
+						rounds: [],
+						totalSearches: 0,
+						totalPagesScraped: 0,
+						durationMs: 0,
 						error: lastError,
-						phase: researchResult
-							? `completed ${researchResult.rounds.length} rounds`
-							: "preparation",
-					},
+					} as ResearchDetails & { error: string },
 					isError: true,
 				};
 			}
@@ -292,6 +367,7 @@ export default function (pi: ExtensionAPI) {
 				depth?: number;
 				breadth?: number;
 				format?: string;
+				audience?: string;
 			},
 			theme: any,
 			_context: any,
@@ -300,11 +376,15 @@ export default function (pi: ExtensionAPI) {
 			const depth = args.depth ?? 2;
 			const breadth = args.breadth ?? 3;
 			const format = args.format ?? "markdown";
+			const audience = args.audience ?? "general";
 
 			const text =
 				theme.fg("toolTitle", theme.bold("deep_research ")) +
 				theme.fg("accent", `"${question}"`) +
-				theme.fg("muted", ` [depth:${depth} breadth:${breadth} ${format}]`);
+				theme.fg(
+					"muted",
+					` [depth:${depth} breadth:${breadth} ${format} ${audience}]`,
+				);
 			return new Text(text, 0, 0);
 		},
 
@@ -407,19 +487,19 @@ export default function (pi: ExtensionAPI) {
 
 	// ── Command ───────────────────────────────────────────────────────
 
-	pi.registerCommand("deep-research", {
+	pi.registerCommand("deepi-research", {
 		description:
-			"Conduct multi-round deep web research on any topic via Firecrawl. Usage: /deep-research <question>",
+			"Conduct multi-round deep web research on any topic via Firecrawl. Usage: /deepi-research <question>",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			if (!args || args.trim().length === 0) {
 				ctx.ui.notify(
-					"Usage: /deep-research <your research question>",
+					"Usage: /deepi-research <your research question>",
 					"error",
 				);
 				return;
 			}
 
-			// Ask about depth/breadth
+			// Ask about depth
 			const depthStr = await ctx.ui.select("Research depth?", [
 				"1 round (quick survey)",
 				"2 rounds (standard)",
@@ -431,6 +511,7 @@ export default function (pi: ExtensionAPI) {
 					? 3
 					: 2;
 
+			// Ask about breadth
 			const breadthStr = await ctx.ui.select("Research breadth?", [
 				"1 query/round (narrow)",
 				"3 queries/round (balanced)",
@@ -442,7 +523,18 @@ export default function (pi: ExtensionAPI) {
 					? 5
 					: 3;
 
-			// Create a promise-based interaction
+			// Ask about audience
+			const audienceStr = await ctx.ui.select("Report audience?", [
+				"General (accessible, explains terms)",
+				"Expert (technical depth, assumes domain knowledge)",
+				"Executive (concise, action-oriented)",
+			]);
+			const audience: Audience = audienceStr?.startsWith("Expert")
+				? "expert"
+				: audienceStr?.startsWith("Executive")
+					? "executive"
+					: "general";
+
 			ctx.ui.setStatus(
 				"deep-research",
 				`🌐 Researching: ${truncate(args, 40)}`,
@@ -453,56 +545,32 @@ export default function (pi: ExtensionAPI) {
 				depth,
 				breadth,
 				format: "markdown",
+				audience,
 			};
 
-			let spinnerIdx = 0;
-			const spinnerTimer = setInterval(() => {
-				spinnerIdx = (spinnerIdx + 1) % SPINNER_FRAMES.length;
-			}, 100);
+			const { onProgress, cleanup } = createProgressWidget(ctx);
 
 			try {
-				const onProgress: ResearchProgress = (update) => {
-					const icon = PHASE_ICONS[update.phase] ?? "";
-					const spinner = SPINNER_FRAMES[spinnerIdx];
-					const lines: string[] = [
-						`${spinner} ${icon} ${truncate(update.message, 80)}`,
-					];
-					if (update.detail) {
-						lines.push(`  ${truncate(update.detail, 76)}`);
-					}
-					if (update.fraction !== undefined) {
-						const barLen = 15;
-						const filled = Math.round(barLen * update.fraction);
-						const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
-						lines.push(`  ${bar}`);
-					}
-					ctx.ui.setWidget("deep-research", lines);
-				};
-
 				const report = await runDeepResearch(config, ctx, onProgress);
 
-				clearInterval(spinnerTimer);
-				ctx.ui.setWidget("deep-research", undefined);
+				cleanup();
 				ctx.ui.setStatus("deep-research", undefined);
 
 				// Show notification
 				ctx.ui.notify(
-					`Research complete: ${report.rounds.length} rounds, ${report.totalSearches} searches, ${report.totalPagesScraped} pages in ${formatDuration(report.durationMs)}`,
+					`Research complete: ${report.rounds.length} rounds, ${report.totalSearches} searches, ${report.totalPagesScraped} pages, ${report.references.length} sources in ${formatDuration(report.durationMs)}`,
 					"info",
 				);
 
 				// Send the report as a user message
 				pi.sendUserMessage(
-					`## Deep Research: ${args}\n\n${report.finalReport}\n\n---\n*${report.rounds.length} rounds · ${report.totalSearches} searches · ${report.totalPagesScraped} pages · ${formatDuration(report.durationMs)}*`,
+					`## Deep Research: ${args}\n\n${report.finalReport}\n\n---\n*${report.rounds.length} rounds · ${report.totalSearches} searches · ${report.totalPagesScraped} pages · ${report.references.length} sources · ${formatDuration(report.durationMs)}*`,
 				);
 			} catch (error) {
-				clearInterval(spinnerTimer);
-				ctx.ui.setWidget("deep-research", undefined);
+				cleanup();
 				ctx.ui.setStatus("deep-research", undefined);
-				ctx.ui.notify(
-					`Research failed: error instanceof Error ? error.message : String(error)`,
-					"error",
-				);
+				const msg = error instanceof Error ? error.message : String(error);
+				ctx.ui.notify(`Research failed: ${msg}`, "error");
 			}
 		},
 	});

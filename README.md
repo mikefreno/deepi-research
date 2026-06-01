@@ -10,6 +10,7 @@ pi install npm:@mikefreno/deep-research
 
 - **Multi-round iteration**: Each round generates follow-up queries based on previous findings (depth 1-3)
 - **Parallel query expansion**: Multiple diverse search queries per round (breadth 1-5) covering technical, practical, comparative, critical, and forward-looking angles
+- **Round-robin parallel execution**: Searches and analyses run concurrently within each round using bounded-concurrency worker pools, dramatically reducing total research time
 - **LLM-driven analysis**: Each round's results are analyzed by an agent session to extract structured findings with confidence ratings
 - **Automatic deduplication**: Search results are deduplicated by URL across all queries
 - **Graceful degradation**: Individual search or analysis failures don't crash the full research — partial results are preserved
@@ -40,7 +41,7 @@ Parameters:
 ### Command (interactive)
 
 ```
-/deep-research <your research question>
+/deepi-research <your research question>
 ```
 
 Prompts for depth (1-3 rounds) and breadth (1-5 queries) interactively, then runs the research and sends the final report as a user message.
