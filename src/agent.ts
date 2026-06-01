@@ -77,7 +77,6 @@ export async function runAnalysisAgent(
 			sessionManager: SessionManager.inMemory(),
 			resourceLoader: loader,
 			tools: ["read", "grep", "find", "ls"],
-			systemPrompt,
 		});
 		sessionRef.session = result.session;
 
@@ -114,7 +113,7 @@ export async function runAnalysisAgent(
 
 		if (signal?.aborted) throw new Error("Aborted");
 
-		await result.session.prompt(taskPrompt);
+		await result.session.prompt(`${systemPrompt}\n\n${taskPrompt}`);
 		await result.session.agent.waitForIdle();
 
 		unsubscribe();
