@@ -21,7 +21,12 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { Box, Text } from "@earendil-works/pi-tui";
+import {
+	Box,
+	Text,
+	truncateToWidth,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
 import { runDeepResearch, type ResearchProgress } from "./src/research";
 import { isFirecrawlReachable } from "./src/firecrawl";
 import type { ResearchConfig, ResearchReport, Audience } from "./src/types";
@@ -157,21 +162,20 @@ function createProgressWidget(
 		(tui: { requestRender(): void }, _theme: any) => {
 			widgetTui = tui;
 			return {
-				render: () => {
+				render: (width: number) => {
 					const spinner = SPINNER_FRAMES[spinnerIdx];
 					const icon = PHASE_ICONS[state.phase] ?? "";
 					const roundInfo =
 						state.round && state.totalRounds
 							? ` Round ${state.round}/${state.totalRounds}`
 							: "";
-					const lines: string[] = [
-						`${spinner} ${icon} ${truncate(state.message, 80)}${roundInfo}`,
-					];
+					const firstLine = `${spinner} ${icon} ${state.message}${roundInfo}`;
+					const lines: string[] = [truncateToWidth(firstLine, width)];
 					if (state.detail) {
-						lines.push(`  ${truncate(state.detail, 76)}`);
+						lines.push(truncateToWidth(`  ${state.detail}`, width));
 					}
 					if (state.fraction > 0) {
-						const barLen = 15;
+						const barLen = Math.min(15, Math.max(3, width - 4));
 						const filled = Math.round(barLen * state.fraction);
 						const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
 						lines.push(`  ${bar}`);
