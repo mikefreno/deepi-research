@@ -1,6 +1,6 @@
 {
   "name": "@mikefreno/deepi-research",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Deep research extension for pi — parallel web research via Firecrawl with iterative query refinement",
   "keywords": [
     "pi-package",
