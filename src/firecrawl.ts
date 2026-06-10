@@ -6,32 +6,53 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 import type { SearchResult, EnrichedSearchResult, ContentType } from "./types";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 /* ── Config ──────────────────────────────────────────────────────── */
 
+/**
+ * Read and merge Firecrawl settings from pi's settings.json files.
+ *
+ * Resolution order (later wins):
+ *   1. env vars FIRECRAWL_BASE_URL / FIRECRAWL_API_KEY
+ *   2. global ~/.pi/agent/settings.json → firecrawl.*
+ *   3. project .pi/settings.json → firecrawl.*
+ *   4. default http://localhost:3002 (if no baseUrl configured)
+ */
 function loadFirecrawlConfig() {
-	const settingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
-	try {
-		const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-		const fc = settings.firecrawl ?? {};
-		return {
-			baseUrl: (
-				fc.baseUrl ??
-				process.env.FIRECRAWL_BASE_URL ??
-				"http://localhost:3002"
-			).replace(/\/+$/, ""),
-			apiKey: fc.apiKey ?? process.env.FIRECRAWL_API_KEY,
-		};
-	} catch {
-		return {
-			baseUrl: (
-				process.env.FIRECRAWL_BASE_URL ?? "http://localhost:3002"
-			).replace(/\/+$/, ""),
-			apiKey: process.env.FIRECRAWL_API_KEY,
-		};
-	}
+	// Start with env var defaults
+	let baseUrl = process.env.FIRECRAWL_BASE_URL ?? "http://localhost:3002";
+	let apiKey = process.env.FIRECRAWL_API_KEY;
+
+	const agentDir = getAgentDir();
+
+	// Helper: read a settings.json and merge its firecrawl.* keys
+	const tryReadSettings = (settingsPath: string): void => {
+		try {
+			const raw = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			const fc: Record<string, string | undefined> = raw.firecrawl ?? {};
+			if (typeof fc.baseUrl === "string" && fc.baseUrl.length > 0) {
+				baseUrl = fc.baseUrl;
+			}
+			if (typeof fc.apiKey === "string" && fc.apiKey.length > 0) {
+				apiKey = fc.apiKey;
+			}
+		} catch {
+			// File missing or unparseable — skip
+		}
+	};
+
+	// 1. Global settings
+	tryReadSettings(path.join(agentDir, "settings.json"));
+
+	// 2. Project settings (override global)
+	tryReadSettings(path.join(process.cwd(), ".pi", "settings.json"));
+
+	return {
+		baseUrl: baseUrl.replace(/\/+$/, ""),
+		apiKey,
+	};
 }
 
 const { baseUrl: BASE_URL, apiKey: API_KEY } = loadFirecrawlConfig();

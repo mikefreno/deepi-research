@@ -585,7 +585,7 @@ export default function (pi: ExtensionAPI) {
 		const reachable = await isFirecrawlReachable();
 		if (!reachable) {
 			ctx.ui.notify(
-				"Deep Research: Firecrawl endpoint unreachable — searches will fail. Check FIRECRAWL_BASE_URL in settings.json or env.",
+				"Deep Research: Firecrawl endpoint unreachable — searches will fail. Set firecrawl.baseUrl in settings.json (global or project) or the FIRECRAWL_BASE_URL env var.",
 				"warning",
 			);
 		}

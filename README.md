@@ -79,20 +79,35 @@ Research Flow:
 
 ## Configuration
 
-Deep Research reads Firecrawl configuration from `~/.pi/agent/settings.json`:
+Deep Research reads Firecrawl configuration from pi's settings.json files, with the following resolution order (later wins):
+
+1. Environment variables (`FIRECRAWL_BASE_URL`, `FIRECRAWL_API_KEY`)
+2. Global settings (`$agentDir/settings.json`) → `firecrawl.*`
+3. Project settings (`.pi/settings.json`) → `firecrawl.*`
+4. Default `http://localhost:3002` (if nothing else sets baseUrl)
+
+The agent directory (`$agentDir`) defaults to `~/.pi/agent` and respects the `PI_CODING_AGENT_DIR` environment variable.
+
+**Global settings** (`~/.pi/agent/settings.json`):
 
 ```json
 {
   "firecrawl": {
     "baseUrl": "http://localhost:3002",
-    "apiKey": "your-api-key"
   }
 }
 ```
 
-Environment variables are also supported:
-- `FIRECRAWL_BASE_URL` — overrides the Firecrawl endpoint (default: `http://localhost:3002`)
-- `FIRECRAWL_API_KEY` — API key for authenticated Firecrawl instances
+**Project settings** (`.pi/settings.json` — overrides global):
+
+```json
+{
+  "firecrawl": {
+    "baseUrl": "https://firecrawl.team.internal"
+    "apiKey": "your-api-key"
+  }
+}
+```
 
 ### Session startup check
 
